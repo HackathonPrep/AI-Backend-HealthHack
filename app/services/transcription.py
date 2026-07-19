@@ -12,6 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+DEBUG_LOG_PATH = "/home/luki/Documents/GitHub/AiHealthHack/.cursor/debug-d4bdc1.log"
 
 SAMPLE_RATE = 16_000
 CHUNK_MS = 400
@@ -50,7 +51,15 @@ class TranscriptionService:
             return
         async with self._load_lock:
             if self.model is None:
+                # region agent log
+                with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log:
+                    log.write(json.dumps({"sessionId":"d4bdc1","runId":"pre-fix","hypothesisId":"H3","location":"transcription.py:ensure_models_loaded","message":"Starting Whisper model load","data":{"streamingModel":self.settings.whisper_model,"finalModel":self.settings.whisper_final_model},"timestamp":int(time.time()*1000)}) + "\n")
+                # endregion
                 await asyncio.to_thread(self._load_models)
+                # region agent log
+                with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log:
+                    log.write(json.dumps({"sessionId":"d4bdc1","runId":"pre-fix","hypothesisId":"H3","location":"transcription.py:ensure_models_loaded","message":"Whisper models loaded","data":{"streamingReady":self.model is not None,"finalReady":self.final_model is not None},"timestamp":int(time.time()*1000)}) + "\n")
+                # endregion
 
     def _load_models(self) -> None:
         logger.info("Loading Whisper streaming model: %s", self.settings.whisper_model)
