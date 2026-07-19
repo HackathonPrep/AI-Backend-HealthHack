@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import chat, ndis, transcription
+from app.api.routers import chat, demo, ndis, transcription
 from app.core.config import get_settings
 from app.services.document_ingestion import DocumentIngestionService
 from app.services.ndis_action_pack import NdisActionPackService
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(ndis.router)
     app.include_router(chat.router)
+    app.include_router(demo.router)
     app.include_router(transcription.router)
 
     @app.get("/health", tags=["health"])

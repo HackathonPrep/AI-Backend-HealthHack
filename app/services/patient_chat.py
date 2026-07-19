@@ -3,16 +3,15 @@ import json
 import logging
 import re
 
-from huggingface_hub.utils import HfHubHTTPError
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import ValidationError
 
-from app.core.ai_trace import trace_config
+from app.core.ai_trace import traced
 from app.core.config import Settings
+from app.core.llm import LlmNotConfiguredError, build_chat_model
 from app.schemas.chat import (
     ChatRole,
     ConversationStage,
@@ -65,6 +64,15 @@ and provide no NDIS recommendations. Do not include a disclaimer; the applicatio
 
 Participant context, which may be empty:
 {ndis_context}
+
+Profile-review context, which is empty for a general chat:
+{profile_review}
+
+When profile-review context is present, help the participant confirm their referral
+profile. Ask follow-up questions only when a missing, edited, or unconfirmed detail
+would materially affect daily support needs, safety, matching, or preferences. Do not
+repeat information already confirmed. Keep the participant in control: suggestions are
+optional and must be explicitly confirmed by them before they are treated as approved.
 """
 
 
@@ -82,21 +90,12 @@ class PatientChatService:
         self.parser = JsonOutputParser(pydantic_object=PatientChatResponse)
 
     def _chain(self):
-        if not self.settings.huggingfacehub_api_token:
-            raise PatientChatError(
-                "The patient chat service is unavailable because its AI provider is not configured."
+        try:
+            chat_model = build_chat_model(
+                self.settings, temperature=0.2, max_output_tokens=1_500
             )
-
-        model, provider = self.settings.huggingface_model_and_provider
-        endpoint_options = {
-            "repo_id": model,
-            "task": "text-generation",
-            "huggingfacehub_api_token": self.settings.huggingfacehub_api_token,
-            "temperature": 0.2,
-            "max_new_tokens": 1_500,
-        }
-        if provider:
-            endpoint_options["provider"] = provider
+        except LlmNotConfiguredError as error:
+            raise PatientChatError(str(error)) from error
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -104,10 +103,6 @@ class PatientChatService:
                 MessagesPlaceholder(variable_name="history"),
                 ("human", "{message}"),
             ]
-        )
-        chat_model = ChatHuggingFace(
-            llm=HuggingFaceEndpoint(**endpoint_options),
-            model_id=model,
         )
         return prompt | chat_model | self.parser
 
@@ -156,18 +151,22 @@ class PatientChatService:
 
         try:
             result = await asyncio.wait_for(
-                self._chain().ainvoke(
+                traced(self._chain(), "patient_chat").ainvoke(
                     {
                         "history": self._to_langchain_history(request),
                         "message": request.message,
                         "ndis_context": json.dumps(request.ndis_context or {}),
+                        "profile_review": json.dumps(
+                            request.profile_review.model_dump()
+                            if request.profile_review
+                            else {}
+                        ),
                         "allowed_categories": "\n".join(
                             f"- {category}"
                             for category in sorted(ALLOWED_SUPPORT_CATEGORIES)
                         ),
                         "format_instructions": self.parser.get_format_instructions(),
                     },
-                    config=trace_config("patient_chat"),
                 ),
                 timeout=self.settings.patient_chat_timeout_seconds,
             )
@@ -178,10 +177,6 @@ class PatientChatService:
         except (OutputParserException, ValidationError) as error:
             raise PatientChatError(
                 "The patient chat service returned an invalid response. Please try again."
-            ) from error
-        except HfHubHTTPError as error:
-            raise PatientChatError(
-                "The patient chat service is temporarily unavailable. Please try again."
             ) from error
         except PatientChatError:
             raise

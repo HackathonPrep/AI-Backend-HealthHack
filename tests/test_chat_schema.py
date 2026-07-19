@@ -45,3 +45,18 @@ def test_urgent_response_requires_urgent_message() -> None:
             urgent_action=True,
             disclaimer="General information only.",
         )
+
+
+def test_profile_review_mode_requires_structured_context() -> None:
+    with pytest.raises(ValidationError, match="profile_review context"):
+        PatientChatRequest(message="Please check my profile.", mode="profile_review")
+
+
+def test_profile_review_mode_accepts_context() -> None:
+    request = PatientChatRequest(
+        message="Please check my profile.",
+        mode="profile_review",
+        profile_review={"current_section": "Recommended supports"},
+    )
+
+    assert request.profile_review.current_section == "Recommended supports"

@@ -50,7 +50,7 @@ def test_history_is_converted_in_order() -> None:
 
 
 def test_urgent_message_bypasses_model_and_returns_fixed_action() -> None:
-    service = PatientChatService(Settings(huggingfacehub_api_token="test-token"))
+    service = PatientChatService(Settings(google_api_key="test-token"))
     response = asyncio.run(
         service.reply(PatientChatRequest(message="I have chest pain and cannot breathe."))
     )
@@ -61,7 +61,7 @@ def test_urgent_message_bypasses_model_and_returns_fixed_action() -> None:
 
 
 def test_chat_response_replaces_model_disclaimer() -> None:
-    service = PatientChatService(Settings(huggingfacehub_api_token="test-token"))
+    service = PatientChatService(Settings(google_api_key="test-token"))
     service._chain = lambda: ValidChatChain()  # type: ignore[method-assign]
 
     response = asyncio.run(service.reply(request_with_history()))
@@ -70,7 +70,7 @@ def test_chat_response_replaces_model_disclaimer() -> None:
 
 
 def test_invalid_model_response_is_exposed_as_safe_error() -> None:
-    service = PatientChatService(Settings(huggingfacehub_api_token="test-token"))
+    service = PatientChatService(Settings(google_api_key="test-token"))
     service._chain = lambda: InvalidChatChain()  # type: ignore[method-assign]
 
     with pytest.raises(PatientChatError, match="invalid response"):

@@ -84,3 +84,11 @@ def trace_config(label: str) -> dict:
     if not get_settings().ai_trace_enabled:
         return {}
     return {"callbacks": [ThinkingTraceCallbackHandler(label)]}
+
+
+def traced(chain: Any, label: str) -> Any:
+    """Attach callbacks to real LangChain runnables without breaking test doubles."""
+    config = trace_config(label)
+    if config and hasattr(chain, "with_config"):
+        return chain.with_config(config)
+    return chain

@@ -11,7 +11,16 @@ class Settings(BaseSettings):
 
     app_name: str = "AI HealthHack Backend"
     environment: str = "development"
-    allowed_origins: str = "http://localhost:5173,http://localhost:4173"
+    allowed_origins: str = (
+        "http://localhost:5173,http://localhost:4173,"
+        "http://127.0.0.1:5173,http://127.0.0.1:4173"
+    )
+    google_api_key: str | None = Field(default=None, repr=False)
+    # Use a pinned, production model.  The `*-latest` aliases are deliberately
+    # repointed by Google and can unexpectedly switch a deployed application to
+    # a preview model that the project's API key cannot use.
+    google_model: str = "gemini-3.5-flash"
+    # Kept for backward-compatible env files; unused when Google is configured.
     huggingfacehub_api_token: str | None = Field(default=None, repr=False)
     huggingface_model: str = "google/gemma-4-31B-it:novita"
     ndis_request_timeout_seconds: float = 90.0
@@ -24,6 +33,7 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_secret_key: str | None = Field(default=None, repr=False)
     supabase_jwks_url: str | None = None
+    demo_patient_id: str | None = None
     whisper_model: str = "tiny"
     whisper_final_model: str = "small"
     ai_trace_enabled: bool = True
@@ -33,16 +43,12 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
     @property
-    def huggingface_model_and_provider(self) -> tuple[str, str | None]:
-        """Split `model:provider`, preserving Hugging Face model namespaces."""
-        model, separator, provider = self.huggingface_model.rpartition(":")
-        if separator and provider:
-            return model, provider
-        return self.huggingface_model, None
-
-    @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_secret_key and self.supabase_jwks_url)
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_api_key)
 
 
 @lru_cache

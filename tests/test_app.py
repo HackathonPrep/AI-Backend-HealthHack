@@ -18,3 +18,9 @@ def test_ndis_route_is_registered() -> None:
     assert "/api/v1/ndis-navigation/plan" in paths
     assert "/api/v1/ndis-navigation/document-plan" in paths
     assert "/api/v1/patient-chat/message" in paths
+    assert "/api/v1/demo/profile" in paths
+    assert "/api/v1/demo/profile/approval" in paths
+    assert "/api/v1/demo/history" in paths
+    assert "/api/v1/demo/chat-history" in paths
+    assert "/api/v1/demo/providers" in paths
+    assert "/api/v1/demo/referrals" in paths

@@ -2,32 +2,54 @@ import asyncio
 import base64
 import io
 import json
+import logging
 from pathlib import Path
 
-from huggingface_hub.utils import HfHubHTTPError
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import ValidationError
 from pypdf import PdfReader
 
-from app.core.ai_trace import trace_config
+from app.core.ai_trace import traced
 from app.core.config import Settings
+from app.core.llm import LlmNotConfiguredError, build_chat_model
 from app.schemas.document import ClinicalExtraction, DocumentPlanResponse
 from app.schemas.ndis import NavigationPlanRequest
 from app.services.ndis_navigation import NdisNavigationError, NdisNavigationService
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png"}
 SUPPORTED_PDF_TYPES = {"application/pdf"}
 
 EXTRACTION_PROMPT = """You are an Australian hospital-to-home clinical information
-extractor. Read the supplied discharge-summary document and return only the structured
-JSON requested below. Extract only information explicitly stated in the document. Do not
-infer diagnoses, equipment, NDIS eligibility, or support needs not documented. Preserve
-uncertainty by using null for missing fields. This task is for a fictional software
-demonstration and is not a clinical decision.
+extractor specialising in discharge summaries written for people with a new or changed
+disability who may need NDIS access or plan review (for example spinal cord injury,
+stroke, acquired brain injury, or other inpatient rehabilitation discharges).
+
+Read the supplied document and return only the structured JSON requested below.
+Extract only information explicitly stated. Do not invent diagnoses, equipment, NDIS
+eligibility, or supports. Use null for missing fields. This task is for a fictional
+software demonstration and is not a clinical decision.
+
+Document structure cues commonly present in these summaries:
+- Patient demographics, admission/discharge dates, discharging unit
+- Reason for admission / principal diagnosis / procedures and hospital course
+- Functional status at discharge (mobility, transfers, personal care, bladder/bowel,
+  skin, cognition/mental health, living situation, informal supports)
+- Discharge supports required (support coordination, support workers, OT, physiotherapy,
+  assistive technology, home modifications, community nursing, transport, psychology)
+- NDIS status and action required (new access request vs existing participant review)
+- Medications on discharge, follow-up, red flags
+
+Mapping guidance:
+- Put AT/equipment lists into equipment_needs and bathroom/access work into home_modifications.
+- Put the full “Discharge Supports Required” narrative into discharge_supports.
+- Put NDIS participation and access/review advice into ndis_status verbatim in substance.
+- Combine bladder and bowel into bladder_bowel when both are present.
 
 {format_instructions}
 """
@@ -41,6 +63,49 @@ class DocumentInputError(DocumentIngestionError):
     """A file fails validation before it is sent to the model."""
 
 
+def resolve_ndis_pathway(
+    extraction: ClinicalExtraction, ndis_context: dict | None
+) -> tuple[str, dict]:
+    """Derive access-request vs plan-review pathway and enrich ndis_context."""
+    context = dict(ndis_context or {})
+    status = (extraction.ndis_status or "").lower()
+    has_plan_hint = context.get("has_active_plan")
+
+    access_markers = (
+        "not an ndis",
+        "not a participant",
+        "non-participant",
+        "no active plan",
+        "access request",
+        "commence an ndis",
+        "commence ndis",
+        "apply for ndis",
+        "ndis access",
+    )
+    review_markers = (
+        "active plan",
+        "existing participant",
+        "current participant",
+        "s48",
+        "plan review",
+        "change of circumstances",
+    )
+
+    if any(marker in status for marker in access_markers) or has_plan_hint is False:
+        pathway = "ndis_access_request"
+        context["has_active_plan"] = False
+    elif any(marker in status for marker in review_markers) or has_plan_hint is True:
+        pathway = "plan_review"
+        context["has_active_plan"] = True
+    else:
+        pathway = "unknown"
+
+    context["pathway"] = pathway
+    if extraction.discharge_supports:
+        context.setdefault("documented_discharge_supports", extraction.discharge_supports)
+    return pathway, context
+
+
 class DocumentIngestionService:
     def __init__(
         self, settings: Settings, navigation_service: NdisNavigationService
@@ -49,26 +114,13 @@ class DocumentIngestionService:
         self.navigation_service = navigation_service
         self.parser = JsonOutputParser(pydantic_object=ClinicalExtraction)
 
-    def _chat_model(self) -> ChatHuggingFace:
-        if not self.settings.huggingfacehub_api_token:
-            raise DocumentIngestionError(
-                "Document processing is unavailable because its AI provider is not configured."
+    def _chat_model(self) -> ChatGoogleGenerativeAI:
+        try:
+            return build_chat_model(
+                self.settings, temperature=0.0, max_output_tokens=2_000
             )
-
-        model, provider = self.settings.huggingface_model_and_provider
-        options = {
-            "repo_id": model,
-            "task": "text-generation",
-            "huggingfacehub_api_token": self.settings.huggingfacehub_api_token,
-            "temperature": 0.0,
-            "max_new_tokens": 2_000,
-        }
-        if provider:
-            options["provider"] = provider
-        return ChatHuggingFace(
-            llm=HuggingFaceEndpoint(**options),
-            model_id=model,
-        )
+        except LlmNotConfiguredError as error:
+            raise DocumentIngestionError(str(error)) from error
 
     def _chain(self):
         prompt = ChatPromptTemplate.from_messages(
@@ -148,22 +200,24 @@ class DocumentIngestionService:
 
         try:
             extracted = await asyncio.wait_for(
-                self._chain().ainvoke(
+                traced(self._chain(), "document_extraction").ainvoke(
                     {
                         "document_message": [HumanMessage(content=document_content)],
                         "format_instructions": self.parser.get_format_instructions(),
                     },
-                    config=trace_config("document_extraction"),
                 ),
                 timeout=self.settings.document_request_timeout_seconds,
             )
             clinical_information = ClinicalExtraction.model_validate(extracted)
+            pathway, plan_context = resolve_ndis_pathway(
+                clinical_information, ndis_context
+            )
             plan = await self.navigation_service.create_plan(
                 NavigationPlanRequest(
                     clinical_extraction=clinical_information.model_dump(
                         exclude_none=True
                     ),
-                    ndis_context=ndis_context or {"context": "Not provided"},
+                    ndis_context=plan_context or {"context": "Not provided"},
                 )
             )
             return DocumentPlanResponse(
@@ -171,6 +225,7 @@ class DocumentIngestionService:
                 extracted_clinical_information=clinical_information,
                 plan=plan,
                 source_text_preview=preview,
+                pathway=pathway,
             )
         except asyncio.TimeoutError as error:
             raise DocumentIngestionError("Document processing timed out.") from error
@@ -178,9 +233,16 @@ class DocumentIngestionService:
             raise DocumentIngestionError(
                 "The document could not be converted into a reliable clinical summary."
             ) from error
-        except (HfHubHTTPError, NdisNavigationError) as error:
+        except NdisNavigationError as error:
+            # This used to hide every planning failure behind a single generic
+            # message. Keep the safe, user-facing error produced by the
+            # navigation service so an invalid model response, timeout, or
+            # unavailable provider can be acted on correctly.
+            raise DocumentIngestionError(str(error)) from error
+        except Exception as error:
+            logger.exception("Unexpected document-processing failure")
             raise DocumentIngestionError(
-                "The document processing service is temporarily unavailable."
+                "The document could not be processed. Please try again with a smaller text-based PDF or a clear page image."
             ) from error
 
     async def extract_clinical_information(
@@ -198,7 +260,7 @@ class DocumentIngestionService:
             document_content = [{"type": "image_url", "image_url": {"url": f"data:{file_type};base64,{encoded_image}"}}, {"type": "text", "text": "Extract clinical and functional information."}]
             preview = "Clinical information was extracted from an uploaded image."
         try:
-            extracted = await asyncio.wait_for(self._chain().ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}, config=trace_config("document_extraction")), timeout=self.settings.document_request_timeout_seconds)
+            extracted = await asyncio.wait_for(traced(self._chain(), "document_extraction").ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}), timeout=self.settings.document_request_timeout_seconds)
             return ClinicalExtraction.model_validate(extracted), preview
         except Exception as error:
             raise DocumentIngestionError("The document could not be converted into a reliable clinical summary.") from error

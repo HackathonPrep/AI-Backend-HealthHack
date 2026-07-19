@@ -3,7 +3,7 @@
 FastAPI backend with two separate capabilities:
 
 - `POST /api/v1/ndis-navigation/plan` creates a structured NDIS navigation plan
-  from clinical and participant context using a Hugging Face inference provider.
+  from clinical and participant context using Google Gemini.
 - `POST /api/v1/patient-chat/message` provides a patient-facing NDIS conversation
   that asks follow-up questions and suggests next actions.
 - `WS /ws/transcribe` provides low-latency Whisper transcription for local,
@@ -60,9 +60,7 @@ The response is validated before it is returned and always contains:
 - `call_script`
 - `next_steps_checklist`
 
-Set `HUGGINGFACEHUB_API_TOKEN` and `HUGGINGFACE_MODEL`. A value such as
-`google/gemma-4-31B-it:novita` is interpreted as model
-`google/gemma-4-31B-it` using the `novita` Hugging Face inference provider.
+Set `GOOGLE_API_KEY` and optionally `GOOGLE_MODEL` (default `gemini-3.5-flash`).
 
 ## Discharge document upload
 
@@ -81,7 +79,7 @@ curl -X POST "http://localhost:8080/api/v1/ndis-navigation/document-plan" \
 The response includes `extracted_clinical_information`, the complete `plan`,
 and a short `source_text_preview`. Uploaded files are processed in memory and
 are not stored by this backend; however, their extracted text or image content
-is sent to the configured Hugging Face inference provider. Do not upload real
+is sent to the configured Google Gemini model. Do not upload real
 patient information unless your privacy, consent, and provider agreements
 permit this. Scanned PDFs with no selectable text should be uploaded as clear
 PNG or JPEG page images.
@@ -144,6 +142,26 @@ Connect to `ws://localhost:8080/ws/transcribe`, then send:
 
 Finish with `{"type": "stop"}`. The service sends `partial` and `final` JSON
 messages. Whisper models load lazily on the first WebSocket connection.
+
+## CareMatch demo data API
+
+The frontend reads the populated Supabase CareMatch schema through authenticated
+backend endpoints:
+
+- `GET /api/v1/demo/profile` — synthetic patient, documents, extractions and needs
+- `POST /api/v1/demo/profile/approval` — appends a participant-approved profile snapshot
+- `GET /api/v1/demo/history` — document/extraction history
+- `GET /api/v1/demo/chat-history` — persisted patient/AI chat turns (`?session_id=` optional)
+- `GET /api/v1/demo/providers` — providers ranked against the patient's needs
+- `GET|POST /api/v1/demo/referrals` — participant or provider referral views
+- `PATCH /api/v1/demo/referrals/{id}` — update intake/referral status
+
+Set `DEMO_PATIENT_ID` to select the synthetic participant shown in the demo.
+Generated document results are persisted into `patient_documents` and
+`ai_extractions`; chat turns are persisted into `ai_chat_history`.
+Apply `supabase/migrations/20260719_participant_profile_approvals.sql` before
+using profile approval persistence. Approved snapshots are append-only and do
+not overwrite source documents or AI extractions.
 
 ## Testing
 

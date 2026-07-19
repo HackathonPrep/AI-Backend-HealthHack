@@ -16,13 +16,30 @@ ALLOWED_SUPPORT_CATEGORIES = {
 }
 
 SUPPORT_CATEGORY_ALIASES = {
+    "Core: Assistance with Daily Life": "Core: Assistance with Daily Life (Support Workers, SIL)",
     "Core: Assistance with Daily Life (Support Workers)": "Core: Assistance with Daily Life (Support Workers, SIL)",
     "Core: Consumables": "Core: Consumables (Wound care, continence products, low-cost AT)",
-    "Capacity Building: Support Coordination (Level 2 Specialist)": "Capacity Building: Support Coordination (Level 2 or Level 3 Specialist)",
-    "Capacity Building: Support Coordination (Level 3 Specialist)": "Capacity Building: Support Coordination (Level 2 or Level 3 Specialist)",
+    "Core: Assistance with Social, Economic and Community Participation": (
+        "Core: Assistance with Social, Economic and Community Participation"
+    ),
+    "Capacity Building: Improved Daily Living": (
+        "Capacity Building: Improved Daily Living "
+        "(Occupational Therapy, Physiotherapy, Speech Pathology, Psychology, Dietetics, Community Nursing)"
+    ),
+    "Capacity Building: Support Coordination": (
+        "Capacity Building: Support Coordination (Level 2 or Level 3 Specialist)"
+    ),
+    "Capacity Building: Support Coordination (Level 2 Specialist)": (
+        "Capacity Building: Support Coordination (Level 2 or Level 3 Specialist)"
+    ),
+    "Capacity Building: Support Coordination (Level 3 Specialist)": (
+        "Capacity Building: Support Coordination (Level 2 or Level 3 Specialist)"
+    ),
     "Capital: Assistive Technology": "Capital: Assistive Technology (Mobility equipment, hoists, beds)",
     "Capital: Home Modifications": "Capital: Home Modifications (Ramps, bathroom modifications)",
-    "Capital: Medium-Term Accommodation (MTA)": "Capital: Medium-Term Accommodation (MTA) / Specialist Disability Accommodation (SDA)",
+    "Capital: Medium-Term Accommodation (MTA)": (
+        "Capital: Medium-Term Accommodation (MTA) / Specialist Disability Accommodation (SDA)"
+    ),
 }
 
 

@@ -3,16 +3,17 @@ import base64
 import json
 import logging
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from faster_whisper import WhisperModel
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
-DEBUG_LOG_PATH = "/home/luki/Documents/GitHub/AiHealthHack/.cursor/debug-d4bdc1.log"
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 SAMPLE_RATE = 16_000
 CHUNK_MS = 400
@@ -31,7 +32,7 @@ def has_speech(audio: np.ndarray) -> bool:
     return audio.size > 0 and np.abs(audio).mean() * 32768.0 > ENERGY_THRESHOLD
 
 
-def transcribe_text(model: WhisperModel, audio: np.ndarray, **kwargs: object) -> str:
+def transcribe_text(model: "WhisperModel", audio: np.ndarray, **kwargs: object) -> str:
     """Consume Whisper's segment iterator off the event loop."""
     segments, _ = model.transcribe(audio, **kwargs)
     return " ".join(segment.text.strip() for segment in segments).strip()
@@ -51,17 +52,14 @@ class TranscriptionService:
             return
         async with self._load_lock:
             if self.model is None:
-                # region agent log
-                with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log:
-                    log.write(json.dumps({"sessionId":"d4bdc1","runId":"pre-fix","hypothesisId":"H3","location":"transcription.py:ensure_models_loaded","message":"Starting Whisper model load","data":{"streamingModel":self.settings.whisper_model,"finalModel":self.settings.whisper_final_model},"timestamp":int(time.time()*1000)}) + "\n")
-                # endregion
                 await asyncio.to_thread(self._load_models)
-                # region agent log
-                with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log:
-                    log.write(json.dumps({"sessionId":"d4bdc1","runId":"pre-fix","hypothesisId":"H3","location":"transcription.py:ensure_models_loaded","message":"Whisper models loaded","data":{"streamingReady":self.model is not None,"finalReady":self.final_model is not None},"timestamp":int(time.time()*1000)}) + "\n")
-                # endregion
 
     def _load_models(self) -> None:
+        # faster-whisper includes native runtime dependencies. Import it only
+        # when a transcription WebSocket is opened so normal HTTP endpoints
+        # (including document uploads) can start on serverless hosts.
+        from faster_whisper import WhisperModel
+
         logger.info("Loading Whisper streaming model: %s", self.settings.whisper_model)
         self.model = WhisperModel(
             self.settings.whisper_model, device="cpu", compute_type="int8"

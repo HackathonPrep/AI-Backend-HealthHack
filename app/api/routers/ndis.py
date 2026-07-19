@@ -1,6 +1,8 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from postgrest.exceptions import APIError
 
 from app.schemas.document import DocumentPlanResponse
 from app.schemas.action_pack import DocumentActionPackResponse
@@ -15,7 +17,27 @@ from app.services.ndis_action_pack import NdisActionPackError, NdisActionPackSer
 from app.core.auth import get_current_user_id
 from app.services.records import RecordRepository
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/ndis-navigation", tags=["NDIS navigation"])
+
+
+def _persist_or_continue(repository: RecordRepository | None, user_id: str, record_type: str, result) -> None:
+    """Persist AI output; never discard a successful plan because of storage failure."""
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Supabase is not configured.")
+    try:
+        repository.create(
+            user_id,
+            record_type,
+            result.source_filename,
+            result.extracted_clinical_information.model_dump(exclude_none=True),
+            result.model_dump(),
+        )
+    except APIError as error:
+        logger.exception("Failed to persist %s result to Supabase", record_type)
+        # Still return the AI result to the client so ProfileReview can use DemoStore.
+        detail = getattr(error, "message", None) or str(error)
+        logger.warning("Continuing without persistence: %s", detail)
 
 
 @router.post("/plan", response_model=NavigationPlanResponse)
@@ -56,8 +78,9 @@ async def create_plan_from_document(
             content=await document.read(),
             ndis_context=parsed_ndis_context,
         )
-        repository: RecordRepository = request.app.state.record_repository
-        repository.create(user_id, "document_plan", result.source_filename, result.extracted_clinical_information.model_dump(exclude_none=True), result.model_dump())
+        _persist_or_continue(
+            request.app.state.record_repository, user_id, "document_plan", result
+        )
         return result
     except DocumentInputError as error:
         raise HTTPException(
@@ -92,8 +115,9 @@ async def create_action_pack(
             action_pack=action_pack,
             source_text_preview=preview,
         )
-        repository: RecordRepository = request.app.state.record_repository
-        repository.create(user_id, "action_pack", result.source_filename, result.extracted_clinical_information.model_dump(exclude_none=True), result.model_dump())
+        _persist_or_continue(
+            request.app.state.record_repository, user_id, "action_pack", result
+        )
         return result
     except DocumentInputError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

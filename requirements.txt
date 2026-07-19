@@ -4,8 +4,8 @@ faster-whisper>=1.0.0
 numpy>=1.26.0
 pydantic-settings
 langchain-core
-langchain-huggingface
-huggingface_hub
+langchain-google-genai
+google-generativeai
 pypdf
 python-multipart
 supabase
