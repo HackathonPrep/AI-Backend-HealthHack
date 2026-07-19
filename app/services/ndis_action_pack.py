@@ -8,7 +8,12 @@ from pydantic import ValidationError
 
 from app.core.ai_trace import traced
 from app.core.config import Settings
-from app.core.llm import LlmNotConfiguredError, build_chat_model
+from app.core.llm import (
+    LlmNotConfiguredError,
+    build_chat_model,
+    is_provider_rate_limited,
+    retry_transient_provider_errors,
+)
 from app.schemas.action_pack import NdisActionPackResponse
 
 logger = logging.getLogger(__name__)
@@ -59,7 +64,7 @@ class NdisActionPackService:
     ) -> NdisActionPackResponse:
         try:
             result = await asyncio.wait_for(
-                traced(self._chain(), "ndis_action_pack").ainvoke(
+                traced(retry_transient_provider_errors(self._chain()), "ndis_action_pack").ainvoke(
                     {
                         "clinical_extraction": json.dumps(clinical_extraction),
                         "ndis_context": json.dumps(ndis_context),
@@ -74,6 +79,10 @@ class NdisActionPackService:
         except NdisActionPackError:
             raise
         except (ValidationError, Exception) as error:
+            if is_provider_rate_limited(error):
+                raise NdisActionPackError(
+                    "The Gemma service is temporarily rate limited. Please wait a minute and try again."
+                ) from error
             logger.exception("Action-pack provider request failed")
             raise NdisActionPackError(
                 "Action-pack generation returned an invalid response."

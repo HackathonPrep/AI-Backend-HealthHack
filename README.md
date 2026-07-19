@@ -3,7 +3,7 @@
 FastAPI backend with two separate capabilities:
 
 - `POST /api/v1/ndis-navigation/plan` creates a structured NDIS navigation plan
-  from clinical and participant context using Google Gemini.
+  from clinical and participant context using Hugging Face Gemma.
 - `POST /api/v1/patient-chat/message` provides a patient-facing NDIS conversation
   that asks follow-up questions and suggests next actions.
 - `WS /ws/transcribe` provides low-latency Whisper transcription for local,
@@ -60,7 +60,8 @@ The response is validated before it is returned and always contains:
 - `call_script`
 - `next_steps_checklist`
 
-Set `GOOGLE_API_KEY` and optionally `GOOGLE_MODEL` (default `gemini-3.5-flash`).
+Set `HF_TOKEN` and optionally `HD_MODEL` (default
+`google/gemma-4-26B-A4B-it:novita`).
 
 ## Discharge document upload
 
@@ -79,7 +80,7 @@ curl -X POST "http://localhost:8080/api/v1/ndis-navigation/document-plan" \
 The response includes `extracted_clinical_information`, the complete `plan`,
 and a short `source_text_preview`. Uploaded files are processed in memory and
 are not stored by this backend; however, their extracted text or image content
-is sent to the configured Google Gemini model. Do not upload real
+is sent to the configured Hugging Face Gemma model. Do not upload real
 patient information unless your privacy, consent, and provider agreements
 permit this. Scanned PDFs with no selectable text should be uploaded as clear
 PNG or JPEG page images.

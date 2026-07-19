@@ -9,7 +9,12 @@ from pydantic import ValidationError
 
 from app.core.ai_trace import traced
 from app.core.config import Settings
-from app.core.llm import LlmNotConfiguredError, build_chat_model
+from app.core.llm import (
+    LlmNotConfiguredError,
+    build_chat_model,
+    is_provider_rate_limited,
+    retry_transient_provider_errors,
+)
 from app.schemas.ndis import (
     ALLOWED_SUPPORT_CATEGORIES,
     NavigationPlanRequest,
@@ -103,7 +108,7 @@ class NdisNavigationService:
     ) -> NavigationPlanResponse:
         try:
             result = await asyncio.wait_for(
-                traced(self._chain(), "ndis_navigation").ainvoke(
+                traced(retry_transient_provider_errors(self._chain()), "ndis_navigation").ainvoke(
                     {
                         "allowed_categories": "\n".join(
                             f"- {category}"
@@ -126,6 +131,10 @@ class NdisNavigationService:
         except NdisNavigationError:
             raise
         except Exception as error:
+            if is_provider_rate_limited(error):
+                raise NdisNavigationError(
+                    "The Gemma service is temporarily rate limited. Please wait a minute and try again."
+                ) from error
             logger.exception("NDIS planning provider request failed")
             raise NdisNavigationError(
                 "The NDIS planning model is unavailable. Please try again shortly."

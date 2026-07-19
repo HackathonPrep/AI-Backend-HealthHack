@@ -10,7 +10,7 @@ from app.services.ndis_navigation import NdisNavigationError, NdisNavigationServ
 
 
 def service() -> DocumentIngestionService:
-    settings = Settings(google_api_key="test-token")
+    settings = Settings(hf_token="test-token")
     return DocumentIngestionService(settings, NdisNavigationService(settings))
 
 
@@ -47,7 +47,7 @@ def test_document_plan_preserves_the_safe_planning_error() -> None:
     import asyncio
 
     ingestion = DocumentIngestionService(
-        Settings(google_api_key="test-token"), UnavailableNavigationService()  # type: ignore[arg-type]
+        Settings(hf_token="test-token"), UnavailableNavigationService()  # type: ignore[arg-type]
     )
     ingestion._chain = lambda: ExtractionChain()  # type: ignore[method-assign]
 

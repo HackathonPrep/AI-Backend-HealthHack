@@ -1,24 +1,36 @@
-"""Shared Google Gemini chat-model factory for LangChain services."""
+"""Shared Hugging Face chat-model factory for the Gemma services."""
 
-import logging
-
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+from huggingface_hub.utils import HfHubHTTPError
 
 from app.core.config import Settings
 
-logger = logging.getLogger(__name__)
-
-_LEGACY_MODEL_ALIASES = {
-    # This alias now points to a preview model and may not be enabled for an
-    # existing API project. Preserve a working deployment that still has the
-    # previous example value in its environment configuration.
-    "gemini-flash-latest": "gemini-3.5-flash",
-    "gemini-2.5-flash": "gemini-3.5-flash",
-}
-
 
 class LlmNotConfiguredError(RuntimeError):
-    """Raised when GOOGLE_API_KEY is missing."""
+    """Raised when the Hugging Face access token is missing."""
+
+
+def is_provider_rate_limited(error: BaseException) -> bool:
+    """Identify the provider's quota/rate-limit response without exposing it."""
+    return "429" in str(error) or "too many requests" in str(error).lower()
+
+
+def retry_transient_provider_errors(chain):
+    """Retry a short-lived Hugging Face/Novita overload before failing a request."""
+    # Unit-test doubles deliberately implement only ``ainvoke``.
+    if not hasattr(chain, "with_retry"):
+        return chain
+    return chain.with_retry(
+        retry_if_exception_type=(HfHubHTTPError,),
+        wait_exponential_jitter=True,
+        stop_after_attempt=3,
+    )
+
+
+def _model_and_provider(model_spec: str) -> tuple[str, str | None]:
+    """Split `organisation/model:provider` without losing model namespaces."""
+    model, separator, provider = model_spec.strip().rpartition(":")
+    return (model, provider) if separator and provider else (model_spec.strip(), None)
 
 
 def build_chat_model(
@@ -26,31 +38,26 @@ def build_chat_model(
     *,
     temperature: float,
     max_output_tokens: int,
-) -> ChatGoogleGenerativeAI:
-    if not settings.google_api_key:
+) -> ChatHuggingFace:
+    if not settings.hf_token:
         raise LlmNotConfiguredError(
-            "AI features are unavailable because GOOGLE_API_KEY is not configured."
-        )
-    configured_model = settings.google_model.strip()
-    model = _LEGACY_MODEL_ALIASES.get(configured_model, configured_model)
-    if model != configured_model:
-        logger.warning(
-            "GOOGLE_MODEL=%s has been replaced with stable model %s.",
-            configured_model,
-            model,
+            "AI features are unavailable because HF_TOKEN is not configured."
         )
 
-    return ChatGoogleGenerativeAI(
-        model=model,
-        google_api_key=settings.google_api_key,
-        temperature=temperature,
-        max_output_tokens=max_output_tokens,
-        # Every current caller parses a JSON response. Asking Gemini for JSON at
-        # the API layer prevents markdown fences and prose from intermittently
-        # breaking the LangChain JSON parser.
-        response_mime_type="application/json",
-        # Gemini 3.5 allocates output tokens to thinking by default. These
-        # extraction/planning calls are tightly structured, so minimal thinking
-        # leaves sufficient tokens for the complete JSON response.
-        thinking_level="minimal",
+    model, provider = _model_and_provider(settings.hd_model)
+    endpoint_options = {
+        "repo_id": model,
+        "task": "text-generation",
+        "huggingfacehub_api_token": settings.hf_token,
+        "temperature": temperature,
+        "max_new_tokens": max_output_tokens,
+        "do_sample": temperature > 0,
+        "timeout": 120,
+    }
+    if provider:
+        endpoint_options["provider"] = provider
+
+    return ChatHuggingFace(
+        llm=HuggingFaceEndpoint(**endpoint_options),
+        model_id=model,
     )

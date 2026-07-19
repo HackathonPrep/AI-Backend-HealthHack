@@ -11,7 +11,12 @@ from pydantic import ValidationError
 
 from app.core.ai_trace import traced
 from app.core.config import Settings
-from app.core.llm import LlmNotConfiguredError, build_chat_model
+from app.core.llm import (
+    LlmNotConfiguredError,
+    build_chat_model,
+    is_provider_rate_limited,
+    retry_transient_provider_errors,
+)
 from app.schemas.chat import (
     ChatRole,
     ConversationStage,
@@ -151,7 +156,7 @@ class PatientChatService:
 
         try:
             result = await asyncio.wait_for(
-                traced(self._chain(), "patient_chat").ainvoke(
+                traced(retry_transient_provider_errors(self._chain()), "patient_chat").ainvoke(
                     {
                         "history": self._to_langchain_history(request),
                         "message": request.message,
@@ -181,6 +186,10 @@ class PatientChatService:
         except PatientChatError:
             raise
         except Exception as error:
+            if is_provider_rate_limited(error):
+                raise PatientChatError(
+                    "The Gemma service is temporarily rate limited. Please wait a minute and try again."
+                ) from error
             logger.exception("Patient chat provider request failed")
             raise PatientChatError(
                 "The patient chat service is temporarily unavailable. Please try again."

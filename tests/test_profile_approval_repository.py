@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.schemas.profile import ProfileApprovalRequest
-from app.services.records import RecordRepository
+from app.services.records import RecordRepository, _transient_profile_approvals
 
 
 class FakeQuery:
@@ -116,6 +116,7 @@ def test_latest_profile_approval_returns_the_newest_snapshot() -> None:
 
 
 def test_profile_approval_falls_back_when_the_migration_has_not_been_applied() -> None:
+    _transient_profile_approvals.clear()
     repository = object.__new__(RecordRepository)
     repository.client = FakeClient()
     repository.configured_demo_patient_id = "patient-1"
@@ -125,4 +126,4 @@ def test_profile_approval_falls_back_when_the_migration_has_not_been_applied() -
 
     assert approval["id"].startswith("transient-")
     assert approval["approved_profile"]["sections"][0]["id"] == "supports"
-    assert repository.latest_profile_approval() is None
+    assert repository.latest_profile_approval() == approval

@@ -1,13 +1,15 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application configuration sourced from the environment."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", populate_by_name=True
+    )
 
     app_name: str = "AI HealthHack Backend"
     environment: str = "development"
@@ -15,14 +17,15 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://localhost:4173,"
         "http://127.0.0.1:5173,http://127.0.0.1:4173"
     )
-    google_api_key: str | None = Field(default=None, repr=False)
-    # Use a pinned, production model.  The `*-latest` aliases are deliberately
-    # repointed by Google and can unexpectedly switch a deployed application to
-    # a preview model that the project's API key cannot use.
-    google_model: str = "gemini-3.5-flash"
-    # Kept for backward-compatible env files; unused when Google is configured.
-    huggingfacehub_api_token: str | None = Field(default=None, repr=False)
-    huggingface_model: str = "google/gemma-4-31B-it:novita"
+    hf_token: str | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN"),
+    )
+    hd_model: str = Field(
+        default="google/gemma-4-26B-A4B-it:novita",
+        validation_alias=AliasChoices("HD_MODEL", "HUGGINGFACE_MODEL"),
+    )
     ndis_request_timeout_seconds: float = 90.0
     patient_chat_timeout_seconds: float = 120.0
     chat_history_limit: int = 20
@@ -47,8 +50,8 @@ class Settings(BaseSettings):
         return bool(self.supabase_url and self.supabase_secret_key and self.supabase_jwks_url)
 
     @property
-    def google_enabled(self) -> bool:
-        return bool(self.google_api_key)
+    def huggingface_enabled(self) -> bool:
+        return bool(self.hf_token)
 
 
 @lru_cache

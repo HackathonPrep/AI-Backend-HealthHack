@@ -9,13 +9,18 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import ChatHuggingFace
 from pydantic import ValidationError
 from pypdf import PdfReader
 
 from app.core.ai_trace import traced
 from app.core.config import Settings
-from app.core.llm import LlmNotConfiguredError, build_chat_model
+from app.core.llm import (
+    LlmNotConfiguredError,
+    build_chat_model,
+    is_provider_rate_limited,
+    retry_transient_provider_errors,
+)
 from app.schemas.document import ClinicalExtraction, DocumentPlanResponse
 from app.schemas.ndis import NavigationPlanRequest
 from app.services.ndis_navigation import NdisNavigationError, NdisNavigationService
@@ -114,7 +119,7 @@ class DocumentIngestionService:
         self.navigation_service = navigation_service
         self.parser = JsonOutputParser(pydantic_object=ClinicalExtraction)
 
-    def _chat_model(self) -> ChatGoogleGenerativeAI:
+    def _chat_model(self) -> ChatHuggingFace:
         try:
             return build_chat_model(
                 self.settings, temperature=0.0, max_output_tokens=2_000
@@ -200,7 +205,7 @@ class DocumentIngestionService:
 
         try:
             extracted = await asyncio.wait_for(
-                traced(self._chain(), "document_extraction").ainvoke(
+                traced(retry_transient_provider_errors(self._chain()), "document_extraction").ainvoke(
                     {
                         "document_message": [HumanMessage(content=document_content)],
                         "format_instructions": self.parser.get_format_instructions(),
@@ -240,6 +245,10 @@ class DocumentIngestionService:
             # unavailable provider can be acted on correctly.
             raise DocumentIngestionError(str(error)) from error
         except Exception as error:
+            if is_provider_rate_limited(error):
+                raise DocumentIngestionError(
+                    "The Gemma service is temporarily rate limited. Please wait a minute and try again."
+                ) from error
             logger.exception("Unexpected document-processing failure")
             raise DocumentIngestionError(
                 "The document could not be processed. Please try again with a smaller text-based PDF or a clear page image."
@@ -260,7 +269,11 @@ class DocumentIngestionService:
             document_content = [{"type": "image_url", "image_url": {"url": f"data:{file_type};base64,{encoded_image}"}}, {"type": "text", "text": "Extract clinical and functional information."}]
             preview = "Clinical information was extracted from an uploaded image."
         try:
-            extracted = await asyncio.wait_for(traced(self._chain(), "document_extraction").ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}), timeout=self.settings.document_request_timeout_seconds)
+            extracted = await asyncio.wait_for(traced(retry_transient_provider_errors(self._chain()), "document_extraction").ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}), timeout=self.settings.document_request_timeout_seconds)
             return ClinicalExtraction.model_validate(extracted), preview
         except Exception as error:
+            if is_provider_rate_limited(error):
+                raise DocumentIngestionError(
+                    "The Gemma service is temporarily rate limited. Please wait a minute and try again."
+                ) from error
             raise DocumentIngestionError("The document could not be converted into a reliable clinical summary.") from error

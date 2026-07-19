@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 _PROFILE_APPROVALS_TABLE = "participant_profile_approvals"
 _MISSING_TABLE_CODE = "PGRST205"
+# Development/demo fallback used only while the approval-table migration has
+# not been applied. A real database table always takes precedence.
+_transient_profile_approvals: dict[str, dict] = {}
 
 
 def _profile_approvals_table_is_missing(error: Exception) -> bool:
@@ -122,10 +125,12 @@ class RecordRepository:
             if not _profile_approvals_table_is_missing(error):
                 raise
             logger.warning(
-                "%s is not available yet; no saved profile approval can be loaded.",
+                "%s is not available yet; using the retained demo approval if present.",
                 _PROFILE_APPROVALS_TABLE,
             )
-            return None
+            return _transient_profile_approvals.get(
+                patient_id or self.demo_patient_id()
+            )
         return rows[0] if rows else None
 
     def save_profile_approval(self, approval: ProfileApprovalRequest) -> dict:
@@ -179,11 +184,13 @@ class RecordRepository:
                 "to enable persistence.",
                 _PROFILE_APPROVALS_TABLE,
             )
-            return {
+            transient_approval = {
                 "id": f"transient-{uuid4()}",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 **record,
             }
+            _transient_profile_approvals[patient_id] = transient_approval
+            return transient_approval
 
     def history(self) -> list[dict]:
         patient_id = self.demo_patient_id()
