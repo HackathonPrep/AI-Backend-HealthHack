@@ -11,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import ValidationError
 
+from app.core.ai_trace import trace_config
 from app.core.config import Settings
 from app.schemas.chat import (
     ChatRole,
@@ -165,7 +166,8 @@ class PatientChatService:
                             for category in sorted(ALLOWED_SUPPORT_CATEGORIES)
                         ),
                         "format_instructions": self.parser.get_format_instructions(),
-                    }
+                    },
+                    config=trace_config("patient_chat"),
                 ),
                 timeout=self.settings.patient_chat_timeout_seconds,
             )

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     supabase_jwks_url: str | None = None
     whisper_model: str = "tiny"
     whisper_final_model: str = "small"
+    ai_trace_enabled: bool = True
 
     @property
     def cors_origins(self) -> list[str]:

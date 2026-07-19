@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import ValidationError
 
+from app.core.ai_trace import trace_config
 from app.core.config import Settings
 from app.schemas.ndis import (
     ALLOWED_SUPPORT_CATEGORIES,
@@ -97,7 +98,8 @@ class NdisNavigationService:
                         "format_instructions": self.parser.get_format_instructions(),
                         "clinical_extraction": json.dumps(request.clinical_extraction),
                         "ndis_context": json.dumps(request.ndis_context),
-                    }
+                    },
+                    config=trace_config("ndis_navigation"),
                 ),
                 timeout=self.settings.ndis_request_timeout_seconds,
             )

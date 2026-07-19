@@ -13,6 +13,7 @@ from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import ValidationError
 from pypdf import PdfReader
 
+from app.core.ai_trace import trace_config
 from app.core.config import Settings
 from app.schemas.document import ClinicalExtraction, DocumentPlanResponse
 from app.schemas.ndis import NavigationPlanRequest
@@ -151,7 +152,8 @@ class DocumentIngestionService:
                     {
                         "document_message": [HumanMessage(content=document_content)],
                         "format_instructions": self.parser.get_format_instructions(),
-                    }
+                    },
+                    config=trace_config("document_extraction"),
                 ),
                 timeout=self.settings.document_request_timeout_seconds,
             )
@@ -196,7 +198,7 @@ class DocumentIngestionService:
             document_content = [{"type": "image_url", "image_url": {"url": f"data:{file_type};base64,{encoded_image}"}}, {"type": "text", "text": "Extract clinical and functional information."}]
             preview = "Clinical information was extracted from an uploaded image."
         try:
-            extracted = await asyncio.wait_for(self._chain().ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}), timeout=self.settings.document_request_timeout_seconds)
+            extracted = await asyncio.wait_for(self._chain().ainvoke({"document_message": [HumanMessage(content=document_content)], "format_instructions": self.parser.get_format_instructions()}, config=trace_config("document_extraction")), timeout=self.settings.document_request_timeout_seconds)
             return ClinicalExtraction.model_validate(extracted), preview
         except Exception as error:
             raise DocumentIngestionError("The document could not be converted into a reliable clinical summary.") from error

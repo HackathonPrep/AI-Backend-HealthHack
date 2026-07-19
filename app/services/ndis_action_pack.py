@@ -6,6 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import ValidationError
 
+from app.core.ai_trace import trace_config
 from app.core.config import Settings
 from app.schemas.action_pack import NdisActionPackResponse
 
@@ -40,7 +41,7 @@ class NdisActionPackService:
 
     async def create(self, clinical_extraction: dict, ndis_context: dict) -> NdisActionPackResponse:
         try:
-            result = await asyncio.wait_for(self._chain().ainvoke({"clinical_extraction": json.dumps(clinical_extraction), "ndis_context": json.dumps(ndis_context), "format_instructions": self.parser.get_format_instructions()}), timeout=self.settings.action_pack_request_timeout_seconds)
+            result = await asyncio.wait_for(self._chain().ainvoke({"clinical_extraction": json.dumps(clinical_extraction), "ndis_context": json.dumps(ndis_context), "format_instructions": self.parser.get_format_instructions()}, config=trace_config("ndis_action_pack")), timeout=self.settings.action_pack_request_timeout_seconds)
             return NdisActionPackResponse.model_validate(result)
         except asyncio.TimeoutError as error:
             raise NdisActionPackError("Action-pack generation timed out.") from error
